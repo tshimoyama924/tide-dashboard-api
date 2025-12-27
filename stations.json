@@ -1,0 +1,19 @@
+[
+  { "station_code": "CB", "name": "千葉港" },
+  { "station_code": "CS", "name": "銚子漁港" },
+  { "station_code": "D1", "name": "日立" },
+  { "station_code": "D2", "name": "鹿島" },
+  { "station_code": "D3", "name": "大洗" },
+  { "station_code": "HM", "name": "本牧" },
+  { "station_code": "KW", "name": "川崎" },
+  { "station_code": "KZ", "name": "木更津" },
+  { "station_code": "MR", "name": "布良" },
+  { "station_code": "QL", "name": "千葉" },
+  { "station_code": "QN", "name": "横須賀" },
+  { "station_code": "QS", "name": "横浜" },
+  { "station_code": "TK", "name": "東京" },
+  { "station_code": "TT", "name": "館山" },
+  { "station_code": "YK", "name": "京浜港" },
+  { "station_code": "Z1", "name": "油壺" },
+  { "station_code": "ZF", "name": "勝浦" }
+]
