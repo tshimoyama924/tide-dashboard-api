@@ -30,6 +30,7 @@ async function readStationsFromBlob(context: InvocationContext): Promise<Station
     try {
         const containerName = process.env.STATIONS_CONTAINER || DEFAULT_CONTAINER;
         const blobName = process.env.STATIONS_BLOB || DEFAULT_BLOB_NAME;
+        context.log(`Attempting blob fetch: container=${containerName}, blob=${blobName}`);
 
         const service = BlobServiceClient.fromConnectionString(connectionString);
         const container = service.getContainerClient(containerName);
@@ -42,6 +43,7 @@ async function readStationsFromBlob(context: InvocationContext): Promise<Station
         }
 
         const data = await streamToBuffer(download.readableStreamBody);
+        context.log("Blob fetch succeeded.");
         return JSON.parse(data.toString("utf-8")) as Station[];
     } catch (err) {
         context.log(`Failed to read blob: ${err}`);
@@ -64,13 +66,21 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
     context.log(`Http function processed request for url "${request.url}"`);
 
     try {
-        const stations = (await readStationsFromBlob(context)) ?? (await readStationsFromFile(context));
+        const stations =
+            (await readStationsFromBlob(context)) ??
+            (await readStationsFromFile(context));
 
         if (!stations) {
             return {
                 status: 500,
                 jsonBody: { error: "stations.json could not be loaded from blob or local file." },
             };
+        }
+
+        if (process.env.STATIONS_CONNECTION_STRING || process.env.STORAGE_CONNECTION_STRING || process.env.AzureWebJobsStorage) {
+            context.log("Response served from blob or attempted blob; if blob failed, fallback was local file.");
+        } else {
+            context.log("Response served from local file fallback (no storage connection string set).");
         }
 
         return {

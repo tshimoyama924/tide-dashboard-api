@@ -1,6 +1,6 @@
 [
-  { "station_code": "CB", "name": "千葉港" },
-  { "station_code": "CS", "name": "銚子漁港" },
+  { "station_code": "CB", "name": "local千葉港" },
+  { "station_code": "CS", "name": "local銚子漁港" },
   { "station_code": "D1", "name": "日立" },
   { "station_code": "D2", "name": "鹿島" },
   { "station_code": "D3", "name": "大洗" },
