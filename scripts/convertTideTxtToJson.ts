@@ -1,10 +1,14 @@
 /**
- * Convert JMA fixed-width tide text into JSON.
+ * Convert JMA fixed-width tide text into JSON (strict fixed-column parsing).
  *
- * Assumptions (see tide_txt_format_spec.md for details):
- * - 24 hourly tide heights at the head of each line, width 3 (signed, 999 => missing).
- * - After hourly: YY SP M SP D STATION SP tide event payload.
- * - Tide events are parsed as sequential (time4 + height3) pairs; first two = high, next two = low.
+ * Column definition (1-based, from JMA):
+ * - Hourly: 1-72 (3 chars x 24, signed, 999 => missing)
+ * - Date : 73-78 (YY + variable M/D with spaces)
+ * - Station: 79-80 (2 chars)
+ * - High tides: 81-108 (4 blocks of [time4][height3])
+ * - Low  tides: 109-136 (4 blocks of [time4][height3])
+ *
+ * This parser uses only fixed slices; no searching/trimming-based detection.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -40,6 +44,18 @@ const HOURS_WIDTH = 3;
 const HOURS_COUNT = 24;
 const YEAR_BASE = 2000;
 
+// Fixed slice indices (0-based, end exclusive)
+const IDX_HOURLY_START = 0;
+const IDX_HOURLY_END = 72;
+const IDX_DATE_START = 72; // col73
+const IDX_DATE_END = 78; // col78
+const IDX_STATION_START = 78; // col79
+const IDX_STATION_END = 80; // col80
+const IDX_HIGH_START = 80; // col81
+const IDX_HIGH_END = 108; // col108
+const IDX_LOW_START = 108; // col109
+const IDX_LOW_END = 136; // col136
+
 function parseArgs(): CliArgs {
     const args = process.argv.slice(2);
     if (args.length === 0) {
@@ -73,12 +89,11 @@ function parseHourly(hourlyRaw: string): Array<number | null> {
     for (let i = 0; i < HOURS_COUNT; i++) {
         const segment = hourlyRaw.slice(i * HOURS_WIDTH, (i + 1) * HOURS_WIDTH);
         const trimmed = segment.trim();
-        const normalized = trimmed.replace(/\s+/g, "");
-        if (!normalized || normalized === "999") {
+        if (!trimmed || trimmed === "999") {
             values.push(null);
             continue;
         }
-        const val = Number(normalized);
+        const val = Number(trimmed);
         if (Number.isNaN(val)) {
             throw new Error(`Invalid hourly value '${segment}' at hour ${i}`);
         }
@@ -87,156 +102,103 @@ function parseHourly(hourlyRaw: string): Array<number | null> {
     return values;
 }
 
-function parseMetaAndPayload(payload: string, expectedStation: string, expectedYear: number) {
-    const trimmed = payload.trim();
-    let stationIndex = trimmed.toUpperCase().indexOf(expectedStation.toUpperCase());
-    if (stationIndex < 0) {
-        // Some files might have wrong station token; attempt last 2 letters as fallback (e.g., '1D2' instead of 'D3')
-        stationIndex = trimmed.length - 2;
-        expectedStation = trimmed.slice(stationIndex).trim().toUpperCase();
-    }
-    const idx = stationIndex;
-    if (idx < 0) {
-        throw new Error(`Station ${expectedStation} not found in meta '${payload}'`);
-    }
-
-    const head = trimmed.slice(0, idx).trim();
-    const rest = trimmed.slice(idx + expectedStation.length).trim();
-
-    const digitsOnly = head.replace(/\s+/g, "");
-    if (digitsOnly.length < 2) {
-        throw new Error(`No year/month/day digits found in '${payload}'`);
-    }
-    const yy = digitsOnly.slice(0, 2);
-    const digitsNoYear = digitsOnly.slice(2);
-
-    const year = YEAR_BASE + Number(yy);
-    if (year !== expectedYear) {
-        // Allow but warn; downstream validation will catch inconsistencies.
-    }
-
-    let month: number;
-    let day: number;
-    if (!digitsNoYear && head.trim() === "") {
-        // fallback: month/day maybe absent in head; try reading from rest prefix (e.g., "1 1D1 ...")
-        const m = restPrefixFromPayload(trimmed, expectedStation);
-        month = m.month;
-        day = m.day;
-    } else {
-        const res = splitMonthDay(digitsNoYear);
-        month = res.month;
-        day = res.day;
-    }
-    if (!month || month > 12 || !day || day > 31) {
-        throw new Error(`Invalid date fields month=${month} day=${day}`);
-    }
-
-    return { year, month, day, station: expectedStation, rest };
-}
-
-function restPrefixFromPayload(payload: string, expectedStation: string): { month: number; day: number } {
-    // Example: "1 1D1 338115..." => tokens before station: "1", "1D1"
-    const tokens = payload.split(/\s+/).filter((t) => t.length > 0);
-    for (const token of tokens) {
-        if (token.toUpperCase().includes(expectedStation.toUpperCase())) {
-            const parts = token.split(expectedStation);
-            const digits = parts[0] || "";
-            return splitMonthDay(digits);
-        }
-    }
-    throw new Error(`Cannot extract month/day from '${payload}'`);
-}
-
-function splitMonthDay(digits: string): { month: number; day: number } {
-    const candidates: Array<{ month: number; day: number }> = [];
-    const tryAdd = (mStr: string, dStr: string) => {
-        if (!mStr || !dStr) return;
-        const m = Number(mStr);
-        const d = Number(dStr);
-        if (!Number.isNaN(m) && !Number.isNaN(d)) {
-            candidates.push({ month: m, day: d });
-        }
-    };
-
-    // Try month length 2 then 1 (prefer valid ranges)
-    if (digits.length >= 2) {
-        if (digits.length >= 3) {
-            tryAdd(digits.slice(0, 2), digits.slice(2));
-        }
-        tryAdd(digits.slice(0, 1), digits.slice(1));
-    } else if (digits.length === 1) {
-        tryAdd(digits.slice(0, 1), "1"); // fallback impossible case
-    }
-
-    for (const c of candidates) {
-        if (c.month >= 1 && c.month <= 12 && c.day >= 1 && c.day <= 31) {
-            return c;
-        }
-    }
-    throw new Error(`Cannot split month/day from '${digits}'`);
-}
-
-function chunkEvents(compact: string): TideEvent[] {
-    // Drop leading count digit if present (e.g., "4...")
-    if (/^\d$/.test(compact[0])) {
-        compact = compact.slice(1);
-    }
+function parseEventsFromSegment(segment: string): TideEvent[] {
     const events: TideEvent[] = [];
-    let cursor = 0;
-    while (cursor + 4 <= compact.length) {
-        const timeStr = compact.slice(cursor, cursor + 4);
-        cursor += 4;
+    const usable = segment.length - (segment.length % 7);
+    const s = segment.slice(0, usable);
 
-        if (cursor >= compact.length) break;
-        let heightSign = "";
-        if (compact[cursor] === "-" || compact[cursor] === "+") {
-            heightSign = compact[cursor];
-            cursor += 1;
-        }
-        const heightDigits = compact.slice(cursor, cursor + 3);
-        cursor += 3;
+    for (let i = 0; i + 7 <= s.length; i += 7) {
+        const blk = s.slice(i, i + 7);
+        const timeRaw = blk.slice(0, 4);
+        const heightRaw = blk.slice(4, 7);
 
-        const timeNum = Number(timeStr);
-        const heightNum = Number(heightSign + heightDigits);
+        let t = timeRaw.trim();
+        if (!t) continue;
+        if (t === "9999") continue;
+        t = t.padStart(4, "0");
+        const hh = Number(t.slice(0, 2));
+        const mm = Number(t.slice(2, 4));
+        if (Number.isNaN(hh) || Number.isNaN(mm) || hh > 23 || mm > 59 || hh < 0 || mm < 0) continue;
 
-        if (timeStr === "9999" || Number.isNaN(timeNum) || timeNum < 0) {
-            continue;
-        }
-        if (heightDigits === "999" || Number.isNaN(heightNum)) {
-            continue;
-        }
+        const hTrim = heightRaw.trim();
+        if (!hTrim) continue;
+        if (hTrim === "999") continue;
+        const hNum = Number(hTrim);
+        if (Number.isNaN(hNum)) continue;
 
-        const hh = String(Math.floor(timeNum / 100)).padStart(2, "0");
-        const mm = String(timeNum % 100).padStart(2, "0");
-        events.push({ time: `${hh}:${mm}`, heightCm: heightNum });
+        events.push({ time: `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`, heightCm: hNum });
     }
+
     return events;
 }
 
-function splitEvents(rest: string) {
-    // Remove spaces and parse sequential time/height pairs.
-    const compact = rest.replace(/\s+/g, "");
-    const events = chunkEvents(compact);
-    const highTides = events.slice(0, 2);
-    const lowTides = events.slice(2, 4);
-    return { highTides, lowTides };
+function parseDateField(field: string, expectedYear: number): { year: number; month: number; day: number } {
+    const raw = field.replace(/\s+$/g, "");
+    if (raw.length < 2) throw new Error(`Invalid date field '${field}'`);
+    const yyStr = raw.slice(0, 2);
+    const yy = Number(yyStr);
+    if (!Number.isInteger(yy)) throw new Error(`Invalid YY '${yyStr}' from '${field}'`);
+    const year = YEAR_BASE + yy;
+    if (year !== expectedYear) throw new Error(`Year mismatch in date field: parsed=${year} expected=${expectedYear}`);
+
+    const rest = raw.slice(2).trim();
+    if (!rest) throw new Error(`Empty month/day in '${field}'`);
+
+    let month: number;
+    let day: number;
+    const parts = rest.split(/\s+/).filter(Boolean);
+    if (parts.length === 2) {
+        month = Number(parts[0]);
+        day = Number(parts[1]);
+    } else if (parts.length === 1) {
+        const md = parts[0];
+        if (md.length === 4) {
+            month = Number(md.slice(0, 2));
+            day = Number(md.slice(2, 4));
+        } else if (md.length === 3) {
+            month = Number(md.slice(0, 1));
+            day = Number(md.slice(1, 3));
+        } else {
+            throw new Error(`Expected MDD or MMDD but got '${md}' from '${field}'`);
+        }
+    } else {
+        throw new Error(`Cannot parse month/day from '${field}'`);
+    }
+
+    if (!(month >= 1 && month <= 12 && day >= 1 && day <= 31)) {
+        throw new Error(`Invalid month/day parsed from '${field}': ${month}/${day}`);
+    }
+
+    return { year, month, day };
+}
+
+function splitEventsFromLine(line: string) {
+    const highSegment = line.slice(IDX_HIGH_START, IDX_HIGH_END);
+    const lowSegment = line.slice(IDX_LOW_START, IDX_LOW_END);
+
+    const highEvents = parseEventsFromSegment(highSegment).slice(0, 2);
+    const lowEvents = parseEventsFromSegment(lowSegment).slice(0, 2);
+
+    return { highTides: highEvents, lowTides: lowEvents };
 }
 
 function parseLine(line: string, expectedYear: number, expectedStation: string): { date: string; day: TideDay } {
-    const hourlyRaw = line.slice(0, HOURS_WIDTH * HOURS_COUNT);
+    if (line.length < IDX_LOW_END) {
+        line = line.padEnd(IDX_LOW_END, " ");
+    }
+
+    const hourlyRaw = line.slice(IDX_HOURLY_START, IDX_HOURLY_END);
     const hourly = parseHourly(hourlyRaw);
 
-    const metaPayload = line.slice(HOURS_WIDTH * HOURS_COUNT).trim();
-    const { year, month, day, station, rest } = parseMetaAndPayload(metaPayload, expectedStation, expectedYear);
+    const dateField = line.slice(IDX_DATE_START, IDX_DATE_END);
+    const { year, month, day } = parseDateField(dateField, expectedYear);
 
-    if (year !== expectedYear) {
-        throw new Error(`Year mismatch in line: ${year} (expected ${expectedYear})`);
-    }
-    if (station !== expectedStation) {
-        throw new Error(`Station mismatch in line: ${station} (expected ${expectedStation})`);
+    const stationField = line.slice(IDX_STATION_START, IDX_STATION_END).trim().toUpperCase();
+    if (stationField !== expectedStation) {
+        throw new Error(`Station mismatch in line: ${stationField} (expected ${expectedStation})`);
     }
 
-    const { highTides, lowTides } = splitEvents(rest);
+    const { highTides, lowTides } = splitEventsFromLine(line);
     const date = `${year.toString().padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 
     return {

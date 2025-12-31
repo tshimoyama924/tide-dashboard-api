@@ -1,18 +1,45 @@
-### tide_txt_format_spec
+tide_txt_format_spec (JMA tide TXT)
+====================================
 
-作業に使った前提をここにまとめます。気象庁の固定長テキスト（本リポジトリの `data_raw/jma/2026_*.txt`）を、簡易にパースできる程度の仕様として定義しています。
+Source of truth: https://www.data.jma.go.jp/kaiyou/db/tide/suisan/readme.html
 
-- 1行 = 1日。
-- 先頭 72 文字に 24 時間分の潮位（3 文字幅 x24）。符号付き整数、欠損は `999`。
-- 73 文字目以降はメタ情報と潮汐イベント。
-  - `YY SP M SP DSTATION SP PAYLOAD`
-    - `YY` : 下 2 桁の年（2000 年代前提）
-    - `M`  : 月 (1〜12)
-    - `D`  : 日 (1〜31)
-    - `STATION` : 2 桁の港コード
-  - `PAYLOAD` : 潮汐イベントの連結。空白を除いた後、`[time4][height3]` を順に並べたものとみなし、先頭 1 桁がイベント数っぽい場合は読み飛ばす。
-    - time が `9999` か height が `999` のイベントは欠損として無視。
-    - 先頭 2 件を高潮、次の 2 件を低潮と扱う（不足分は空扱い）。
-- 解析できない行や値はエラーにする。
+Line structure (fixed columns, 1-based):
+- Columns 1-72   : Hourly tide heights (24 values, 3 chars each, signed int). Missing = `999` -> JSON null.
+- Columns 73-78  : Date field = `YY` + month/day with spaces (examples: `26 1 1`, `2610 1`, `261231`).
+- Columns 79-80  : Station code (2 chars).
+- Columns 81-108 : High tides, 4 blocks of 7 chars `[time4][height3]`.
+- Columns 109-136: Low tides, 4 blocks of 7 chars `[time4][height3]`.
 
-この仕様に沿って `scripts/convertTideTxtToJson.ts` で JSON に変換し、`data/tide/{year}/{station}.json` を出力します。*** End Patch
+Event block rules:
+- `time4`: trim -> padStart(4, "0") -> HHMM. Skip if empty or `9999`. Invalid if HH>23 or MM>59.
+- `height3`: trim, allow sign, parseInt. Skip if empty or `999`.
+- From each segment (high/low), take the first 2 valid events in order. If none, return [].
+
+Date parsing (columns 73-78):
+- YY = first 2 chars -> year = 2000 + YY (must match target year).
+- Remainder after YY, trimmed:
+  - If contains spaces: split into month, day.
+  - If no spaces and length=4: MMDD.
+  - If no spaces and length=3: MDD (e.g., `110` => Jan 10).
+- Month 1-12, day 1-31 required.
+
+Hourly parsing:
+- 24 segments of width 3 from columns 1-72.
+- `999` or blank => null. Otherwise signed integer.
+
+Conversion script (fixed-column only):
+- `scripts/convertTideTxtToJson.ts`
+- Per line:
+  - hourly = slice(0,72)
+  - date  = slice(72,78) -> year/month/day
+  - station = slice(78,80)
+  - high segment = slice(80,108), low segment = slice(108,136)
+  - events parsed in 7-char blocks with the above rules.
+
+Validation script:
+- `scripts/validateTideJsonAgainstTxt.ts`
+- Re-parses TXT with the same fixed-column rules and compares to JSON.
+
+Run examples (after `npm run build`):
+- Convert all: `node dist/scripts/convertTideTxtToJson.js`
+- Validate:    `node dist/scripts/validateTideJsonAgainstTxt.js --year 2026`
