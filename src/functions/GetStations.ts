@@ -66,9 +66,7 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
     context.log(`Http function processed request for url "${request.url}"`);
 
     try {
-        const stations =
-            (await readStationsFromBlob(context)) ??
-            (await readStationsFromFile(context));
+        const stations = (await readStationsFromBlob(context)) ?? (await readStationsFromFile(context));
 
         if (!stations) {
             return {
@@ -77,7 +75,11 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
             };
         }
 
-        if (process.env.STATIONS_CONNECTION_STRING || process.env.STORAGE_CONNECTION_STRING || process.env.AzureWebJobsStorage) {
+        if (
+            process.env.STATIONS_CONNECTION_STRING ||
+            process.env.STORAGE_CONNECTION_STRING ||
+            process.env.AzureWebJobsStorage
+        ) {
             context.log("Response served from blob or attempted blob; if blob failed, fallback was local file.");
         } else {
             context.log("Response served from local file fallback (no storage connection string set).");
@@ -100,5 +102,13 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
 app.http("GetStations", {
     methods: ["GET"],
     authLevel: "anonymous",
+    handler: GetStations,
+});
+
+// Add versioned route: /api/v1/stations
+app.http("GetStationsV1", {
+    methods: ["GET"],
+    authLevel: "anonymous",
+    route: "v1/stations",
     handler: GetStations,
 });
