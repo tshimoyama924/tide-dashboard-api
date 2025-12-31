@@ -26,6 +26,7 @@ local.settings.json
 
 node_modules
 dist
+data_raw/
 
 # Local python packages
 .python_packages/
