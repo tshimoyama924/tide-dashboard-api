@@ -22,9 +22,12 @@ const STATIONS_CONTAINER = "master";
 const TIDE_CONTAINER = "data";
 const TIDE_PATH_PREFIX = "tide";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_CONTROL = "public, max-age=86400";
 
 const stationCache: { expiresAt: number; data: Station[] } = { expiresAt: 0, data: [] };
-const tideCache = new Map<string, { expiresAt: number; data: TideYear }>();
+const tideCache = new Map<string, { expiresAt: number; data: TideYear; etag?: string }>();
+
+const normalizeEtag = (value: string): string => value.trim().replace(/^W\//i, "").replace(/^"+|"+$/g, "");
 
 function getConnectionString(): string | undefined {
     return (
@@ -48,25 +51,26 @@ async function downloadJson<T>(
     context: InvocationContext,
     container: string,
     blobPath: string
-): Promise<T | undefined> {
+): Promise<{ data?: T; etag?: string }> {
     const service = createBlobService(context);
     if (!service) {
-        return undefined;
+        return {};
     }
     const client = service.getContainerClient(container).getBlobClient(blobPath);
     try {
         const res = await client.download();
+        const etag = res.etag ?? undefined;
         const stream = res.readableStreamBody;
-        if (!stream) return undefined;
+        if (!stream) return { etag };
 
         const chunks: Buffer[] = [];
         for await (const c of stream) {
             chunks.push(typeof c === "string" ? Buffer.from(c) : c);
         }
-        return JSON.parse(Buffer.concat(chunks).toString("utf-8")) as T;
+        return { data: JSON.parse(Buffer.concat(chunks).toString("utf-8")) as T, etag };
     } catch (err) {
         if (err instanceof RestError && err.statusCode === 404) {
-            return undefined;
+            return {};
         }
         context.log(`Failed to read blob ${container}/${blobPath}: ${err}`);
         throw err;
@@ -78,7 +82,7 @@ async function getStations(context: InvocationContext): Promise<Station[] | unde
     if (stationCache.expiresAt > now && stationCache.data.length > 0) {
         return stationCache.data;
     }
-    const stations = await downloadJson<Station[]>(context, STATIONS_CONTAINER, "stations.json");
+    const { data: stations } = await downloadJson<Station[]>(context, STATIONS_CONTAINER, "stations.json");
     if (!stations) return undefined;
     stationCache.data = stations;
     stationCache.expiresAt = now + CACHE_TTL_MS;
@@ -109,20 +113,20 @@ async function getTideYear(
     context: InvocationContext,
     year: number,
     stationCode: string
-): Promise<TideYear | undefined> {
+): Promise<{ data?: TideYear; etag?: string }> {
     const cacheKey = `${year}-${stationCode}`;
     const cached = tideCache.get(cacheKey);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
-        return cached.data;
+        return { data: cached.data, etag: cached.etag };
     }
 
     const blobPath = `${TIDE_PATH_PREFIX}/${year}/${stationCode}.json`;
-    const data = await downloadJson<TideYear>(context, TIDE_CONTAINER, blobPath);
-    if (!data) return undefined;
+    const { data, etag } = await downloadJson<TideYear>(context, TIDE_CONTAINER, blobPath);
+    if (!data) return {};
 
-    tideCache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
-    return data;
+    tideCache.set(cacheKey, { data, etag, expiresAt: now + CACHE_TTL_MS });
+    return { data, etag };
 }
 
 function makeResponseBody(stationCode: string, date: string, tideYear: TideYear, tideDay: TideDay) {
@@ -173,24 +177,50 @@ export async function GetTides(request: HttpRequest, context: InvocationContext)
         }
 
         const year = parseInt(date.slice(0, 4), 10);
-        const tideYear = await getTideYear(context, year, stationCode);
+        const { data: tideYear, etag } = await getTideYear(context, year, stationCode);
         if (!tideYear) {
-            return { status: 404, jsonBody: { error: "Tide data not found for the specified year." } };
+            return {
+                status: 404,
+                headers: { "Cache-Control": "no-store" },
+                jsonBody: { error: "Tide data not found for the specified year." },
+            };
         }
 
         const tideDay = tideYear.days?.[date];
         if (!tideDay) {
-            return { status: 404, jsonBody: { error: "Tide data not found for the specified date." } };
+            return {
+                status: 404,
+                headers: { "Cache-Control": "no-store" },
+                jsonBody: { error: "Tide data not found for the specified date." },
+            };
+        }
+
+        if (etag && request.headers.get("if-none-match")) {
+            const ifNoneMatch = request.headers.get("if-none-match")!;
+            if (normalizeEtag(ifNoneMatch) === normalizeEtag(etag)) {
+                return {
+                    status: 304,
+                    headers: { ETag: etag, "Cache-Control": CACHE_CONTROL },
+                };
+            }
         }
 
         return {
             status: 200,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": CACHE_CONTROL,
+                ...(etag ? { ETag: etag } : {}),
+            },
             jsonBody: makeResponseBody(stationCode, date, tideYear, tideDay),
         };
     } catch (err) {
         context.log(`Error loading tides: ${err}`);
-        return { status: 500, jsonBody: { error: "Unexpected error loading tides." } };
+        return {
+            status: 500,
+            headers: { "Cache-Control": "no-store" },
+            jsonBody: { error: "Unexpected error loading tides." },
+        };
     }
 }
 

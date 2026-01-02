@@ -5,8 +5,13 @@ import path from "node:path";
 
 const DEFAULT_CONTAINER = "master";
 const DEFAULT_BLOB_NAME = "stations.json";
+const CACHE_CONTROL = "public, max-age=86400";
 
 type Station = { station_code: string; name: string };
+
+const stationsCache: { data?: Station[]; etag?: string } = {};
+
+const normalizeEtag = (value: string): string => value.trim().replace(/^W\//i, "").replace(/^"+|"+$/g, "");
 
 async function streamToBuffer(readable: NodeJS.ReadableStream): Promise<Buffer> {
     const chunks: Buffer[] = [];
@@ -44,6 +49,7 @@ async function readStationsFromBlob(context: InvocationContext): Promise<Station
 
         const data = await streamToBuffer(download.readableStreamBody);
         context.log("Blob fetch succeeded.");
+        stationsCache.etag = download.etag ?? undefined;
         return JSON.parse(data.toString("utf-8")) as Station[];
     } catch (err) {
         context.log(`Failed to read blob: ${err}`);
@@ -66,14 +72,36 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
     context.log(`Http function processed request for url "${request.url}"`);
 
     try {
-        const stations = (await readStationsFromBlob(context)) ?? (await readStationsFromFile(context));
+        const ifNoneMatch = request.headers.get("if-none-match");
+
+        // Serve from cache if already loaded
+        if (
+            stationsCache.data &&
+            stationsCache.etag &&
+            ifNoneMatch &&
+            normalizeEtag(ifNoneMatch) === normalizeEtag(stationsCache.etag)
+        ) {
+            return {
+                status: 304,
+                headers: { ETag: stationsCache.etag, "Cache-Control": CACHE_CONTROL },
+            };
+        }
+
+        const stations =
+            stationsCache.data ??
+            (await readStationsFromBlob(context)) ??
+            (await readStationsFromFile(context));
 
         if (!stations) {
             return {
                 status: 500,
+                headers: { "Cache-Control": "no-store" },
                 jsonBody: { error: "stations.json could not be loaded from blob or local file." },
             };
         }
+
+        // Cache after successful load
+        stationsCache.data = stations;
 
         if (
             process.env.STATIONS_CONNECTION_STRING ||
@@ -87,13 +115,18 @@ export async function GetStations(request: HttpRequest, context: InvocationConte
 
         return {
             status: 200,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": CACHE_CONTROL,
+                ...(stationsCache.etag ? { ETag: stationsCache.etag } : {}),
+            },
             jsonBody: stations,
         };
     } catch (err) {
         context.log(`Error loading stations: ${err}`);
         return {
             status: 500,
+            headers: { "Cache-Control": "no-store" },
             jsonBody: { error: "Unexpected error loading stations." },
         };
     }
