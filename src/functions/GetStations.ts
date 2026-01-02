@@ -7,7 +7,7 @@ const DEFAULT_CONTAINER = "master";
 const DEFAULT_BLOB_NAME = "stations.json";
 const CACHE_CONTROL = "public, max-age=86400";
 
-type Station = { station_code: string; name: string };
+type Station = { station_code: string; name: string; area_code: string; area_name: string };
 
 const stationsCache: { data?: Station[]; etag?: string } = {};
 
