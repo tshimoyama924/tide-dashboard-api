@@ -1,22 +1,22 @@
 [
-  { "station_code": "CB", "name": "千葉港", "area_code": "120011", "area_name": "千葉中央" },
-  { "station_code": "CS", "name": "銚子漁港", "area_code": "120021", "area_name": "香取・海匝" },
+  { "station_code": "CB", "name": "千葉港", "office_code": "120000", "area_code": "120011", "area_name": "千葉中央" },
+  { "station_code": "CS", "name": "銚子漁港", "office_code": "120000", "area_code": "120021", "area_name": "香取・海匝" },
 
-  { "station_code": "D1", "name": "日立", "area_code": "080012", "area_name": "県北地域" },
-  { "station_code": "D2", "name": "鹿島", "area_code": "080021", "area_name": "鹿行地域" },
-  { "station_code": "D3", "name": "大洗", "area_code": "080021", "area_name": "鹿行地域" },
+  { "station_code": "D1", "name": "日立", "office_code": "080000", "area_code": "080012", "area_name": "県北地域" },
+  { "station_code": "D2", "name": "鹿島", "office_code": "080000", "area_code": "080021", "area_name": "鹿行地域" },
+  { "station_code": "D3", "name": "大洗", "office_code": "080000", "area_code": "080021", "area_name": "鹿行地域" },
 
-  { "station_code": "HM", "name": "本牧", "area_code": "140011", "area_name": "横浜・川崎" },
-  { "station_code": "KW", "name": "川崎", "area_code": "140011", "area_name": "横浜・川崎" },
-  { "station_code": "KZ", "name": "木更津", "area_code": "120031", "area_name": "君津" },
-  { "station_code": "MR", "name": "布良", "area_code": "120032", "area_name": "夷隅・安房" },
+  { "station_code": "HM", "name": "本牧", "office_code": "140000", "area_code": "140011", "area_name": "横浜・川崎" },
+  { "station_code": "KW", "name": "川崎", "office_code": "140000", "area_code": "140011", "area_name": "横浜・川崎" },
+  { "station_code": "KZ", "name": "木更津", "office_code": "120000", "area_code": "120031", "area_name": "君津" },
+  { "station_code": "MR", "name": "布良", "office_code": "120000", "area_code": "120032", "area_name": "夷隅・安房" },
 
-  { "station_code": "QL", "name": "千葉", "area_code": "120011", "area_name": "千葉中央" },
-  { "station_code": "QN", "name": "横須賀", "area_code": "140013", "area_name": "三浦半島" },
-  { "station_code": "QS", "name": "横浜", "area_code": "140011", "area_name": "横浜・川崎" },
-  { "station_code": "TK", "name": "東京", "area_code": "130012", "area_name": "23区東部" },
-  { "station_code": "TT", "name": "館山", "area_code": "120032", "area_name": "夷隅・安房" },
-  { "station_code": "YK", "name": "京浜港", "area_code": "140011", "area_name": "横浜・川崎" },
-  { "station_code": "Z1", "name": "油壺", "area_code": "140013", "area_name": "三浦半島" },
-  { "station_code": "ZF", "name": "勝浦", "area_code": "120032", "area_name": "夷隅・安房" }
+  { "station_code": "QL", "name": "千葉", "office_code": "120000", "area_code": "120011", "area_name": "千葉中央" },
+  { "station_code": "QN", "name": "横須賀", "office_code": "140000", "area_code": "140013", "area_name": "三浦半島" },
+  { "station_code": "QS", "name": "横浜", "office_code": "140000", "area_code": "140011", "area_name": "横浜・川崎" },
+  { "station_code": "TK", "name": "東京", "office_code": "130000", "area_code": "130012", "area_name": "23区東部" },
+  { "station_code": "TT", "name": "館山", "office_code": "120000", "area_code": "120032", "area_name": "夷隅・安房" },
+  { "station_code": "YK", "name": "京浜港", "office_code": "140000", "area_code": "140011", "area_name": "横浜・川崎" },
+  { "station_code": "Z1", "name": "油壺", "office_code": "140000", "area_code": "140013", "area_name": "三浦半島" },
+  { "station_code": "ZF", "name": "勝浦", "office_code": "120000", "area_code": "120032", "area_name": "夷隅・安房" }
 ]
