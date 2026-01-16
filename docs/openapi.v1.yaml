@@ -1,0 +1,673 @@
+openapi: 3.0.3
+info:
+  title: Tide Dashboard API
+  version: "1.0.0"
+  description: >
+    Public endpoints for tide, weather, and fishing forecast data.
+    Base path is /api/v1 on Azure Functions.
+servers:
+  - url: https://api.tsuriba-guide.com
+    description: Production (replace with http://localhost:7071 for local testing)
+paths:
+  /api/v1/stations:
+    get:
+      summary: List stations
+      description: Returns the station master. Cached for one day with ETag-based 304 responses.
+      responses:
+        "200":
+          description: Station list.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              description: Present when served from blob storage.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Station"
+              example:
+                - station_code: CS
+                  name: 銚子漁港
+                  office_code: "120000"
+                  area_code: "120021"
+                  area_name: 東部沿岸
+                  forecast_area_code: "120020"
+        "304":
+          description: Not modified (If-None-Match matched ETag).
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+        "500":
+          description: "Stations master could not be loaded. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: stations.json could not be loaded from blob or local file.
+
+  /api/v1/tides:
+    get:
+      summary: Get tide data for a day
+      description: >
+        Returns 24-hour tide levels and high/low tides for the specified station and date.
+        Cached for one day with ETag-based 304 responses.
+      parameters:
+        - in: query
+          name: station_code
+          required: true
+          schema:
+            type: string
+          description: Station code defined in stations.json (e.g., CS).
+        - in: query
+          name: date
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Target date (YYYY-MM-DD).
+      responses:
+        "200":
+          description: Tide data found.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TideResponse"
+        "304":
+          description: Not modified (If-None-Match matched ETag).
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+        "400":
+          description: Validation error (missing/invalid station_code or date).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missingStation:
+                  value:
+                    error: station_code is required
+                invalidDate:
+                  value:
+                    error: date must be in YYYY-MM-DD format
+        "404":
+          description: No tide data for the requested year/date.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: Tide data not found for the specified date.
+        "500":
+          description: "Internal error while loading tide data. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: Unexpected error loading tides.
+
+  /api/v1/weather-codes:
+    get:
+      summary: List weather codes
+      description: Returns the full weather code map. Cached for one day with shared ETag.
+      responses:
+        "200":
+          description: Weather codes map.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherCodesAll"
+              example:
+                "100":
+                  icon_day: 100.svg
+                  icon_night: 500.svg
+                  group: "100"
+                  ja: 晴
+                  en: CLEAR
+                "201":
+                  icon_day: 201.svg
+                  icon_night: 601.svg
+                  group: "200"
+                  ja: 曇一時雨
+                  en: MOSTLY CLOUDY
+        "304":
+          description: Not modified (If-None-Match matched shared ETag).
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+        "500":
+          description: "Weather code master unavailable. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal_error
+
+  /api/v1/weather-codes/{code}:
+    get:
+      summary: Get a weather code entry
+      description: Returns a single weather code entry. Cached for one day with shared ETag.
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: string
+          description: Weather code (e.g., 201).
+      responses:
+        "200":
+          description: Weather code found.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherCodeOne"
+              example:
+                code: "201"
+                icon_day: 201.svg
+                icon_night: 601.svg
+                group: "200"
+                ja: 曇一時雨
+                en: MOSTLY CLOUDY
+        "304":
+          description: Not modified (If-None-Match matched shared ETag).
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+        "404":
+          description: Weather code not defined.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=86400
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherCodeNotFound"
+              example:
+                error: weather_code_not_found
+                code: "999"
+        "500":
+          description: "Weather code master unavailable. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: internal_error
+
+  /api/v1/fishing-forecast:
+    get:
+      summary: Fishing forecast (orchestrator)
+      description: >
+        Combines station master, tide data, and JMA short/weekly forecasts for the requested station and date.
+        Cached for 10 minutes.
+      parameters:
+        - in: query
+          name: station_code
+          required: true
+          schema:
+            type: string
+          description: Station code defined in stations.json.
+        - in: query
+          name: date
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Target date (YYYY-MM-DD).
+      responses:
+        "200":
+          description: Forecast assembled successfully.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: public, max-age=600
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FishingForecastResponse"
+        "400":
+          description: Validation error (missing/invalid station_code or date).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Station not found, or tide data missing for the date/year.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: "Failed to fetch upstream JMA forecast. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: Failed to fetch JMA forecast.
+        "500":
+          description: "Internal error. Cache-Control: no-store."
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    Station:
+      type: object
+      properties:
+        station_code:
+          type: string
+          description: Two-character station code.
+        name:
+          type: string
+        office_code:
+          type: string
+          description: JMA prefecture forecast area code.
+        area_code:
+          type: string
+          description: JMA short-term forecast area code.
+        area_name:
+          type: string
+          nullable: true
+        forecast_area_code:
+          type: string
+          nullable: true
+      required:
+        - station_code
+        - name
+        - office_code
+        - area_code
+    TideEvent:
+      type: object
+      properties:
+        time:
+          type: string
+          description: HH:MM (24h)
+        heightCm:
+          type: number
+      required:
+        - time
+        - heightCm
+    TideResponse:
+      type: object
+      properties:
+        station_code:
+          type: string
+        date:
+          type: string
+          format: date
+        hourly:
+          type: array
+          minItems: 24
+          maxItems: 24
+          items:
+            type: integer
+            nullable: true
+          description: 24 hourly tide heights in cm; missing values are null.
+        highTides:
+          type: array
+          items:
+            $ref: "#/components/schemas/TideEvent"
+        lowTides:
+          type: array
+          items:
+            $ref: "#/components/schemas/TideEvent"
+        meta:
+          type: object
+          properties:
+            source:
+              type: string
+              example: JMA
+            year:
+              type: integer
+            dataVersion:
+              type: string
+          required:
+            - source
+            - year
+            - dataVersion
+      required:
+        - station_code
+        - date
+        - hourly
+        - highTides
+        - lowTides
+        - meta
+    WeatherCodeEntry:
+      type: object
+      properties:
+        icon_day:
+          type: string
+        icon_night:
+          type: string
+        group:
+          type: string
+        ja:
+          type: string
+        en:
+          type: string
+      required:
+        - icon_day
+        - icon_night
+        - group
+        - ja
+        - en
+    WeatherCodesAll:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/WeatherCodeEntry"
+      description: Map of weather code to entry.
+    WeatherCodeOne:
+      allOf:
+        - $ref: "#/components/schemas/WeatherCodeEntry"
+        - type: object
+          properties:
+            code:
+              type: string
+          required:
+            - code
+    FishingForecastToday:
+      type: object
+      properties:
+        weather:
+          type: object
+          properties:
+            code:
+              type: string
+              nullable: true
+            text_ja:
+              type: string
+              nullable: true
+            icon:
+              type: string
+              nullable: true
+          required:
+            - code
+            - text_ja
+            - icon
+        wind_text:
+          type: string
+          nullable: true
+        wave_text:
+          type: string
+          nullable: true
+        pop:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: string
+                description: HH:MM
+              value:
+                type: number
+                nullable: true
+            required:
+              - time
+              - value
+      required:
+        - weather
+        - wind_text
+        - wave_text
+        - pop
+    FishingForecastWeeklyDay:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        weather:
+          type: object
+          properties:
+            code:
+              type: string
+              nullable: true
+            text_ja:
+              type: string
+              nullable: true
+            icon:
+              type: string
+              nullable: true
+          required:
+            - code
+        pop:
+          type: number
+          nullable: true
+        temp_min:
+          type: number
+          nullable: true
+        temp_max:
+          type: number
+          nullable: true
+        reliability:
+          type: string
+          nullable: true
+      required:
+        - date
+        - weather
+    FishingForecastResponse:
+      type: object
+      properties:
+        station:
+          $ref: "#/components/schemas/Station"
+        date:
+          type: string
+          format: date
+        tide:
+          type: object
+          properties:
+            hourly_cm:
+              type: array
+              minItems: 24
+              maxItems: 24
+              items:
+                type: number
+                nullable: true
+            high:
+              type: array
+              items:
+                type: object
+                properties:
+                  time:
+                    type: string
+                  height_cm:
+                    type: number
+                required:
+                  - time
+                  - height_cm
+            low:
+              type: array
+              items:
+                type: object
+                properties:
+                  time:
+                    type: string
+                  height_cm:
+                    type: number
+                required:
+                  - time
+                  - height_cm
+            meta:
+              type: object
+              properties:
+                source:
+                  type: string
+                  example: JMA
+                year:
+                  type: integer
+                dataVersion:
+                  type: string
+              required:
+                - source
+                - year
+                - dataVersion
+          required:
+            - hourly_cm
+            - high
+            - low
+            - meta
+        today:
+          $ref: "#/components/schemas/FishingForecastToday"
+        weekly:
+          type: array
+          items:
+            $ref: "#/components/schemas/FishingForecastWeeklyDay"
+        meta:
+          type: object
+          properties:
+            forecast_source:
+              type: string
+              example: JMA
+            forecast_report_datetime:
+              type: string
+              nullable: true
+              format: date-time
+            weekly_temp_area:
+              type: object
+              nullable: true
+              properties:
+                name:
+                  type: string
+                code:
+                  type: string
+              required:
+                - name
+                - code
+            used_area_code:
+              type: string
+              nullable: true
+            used_pop_area_code:
+              type: string
+              nullable: true
+          required:
+            - forecast_source
+            - forecast_report_datetime
+      required:
+        - station
+        - date
+        - tide
+        - today
+        - weekly
+        - meta
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          nullable: true
+      required:
+        - error
+    WeatherCodeNotFound:
+      type: object
+      properties:
+        error:
+          type: string
+          example: weather_code_not_found
+        code:
+          type: string
+      required:
+        - error
+        - code
